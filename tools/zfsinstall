@@ -22,6 +22,7 @@ help() {
 	echo "-p pool_name      : specify a name for the ZFS pool (default: tank)"
 	echo "-V pool_version   : specify a version number for ZFS pool (default: 13)"
 	echo "-m mount_point    : use this mount point for operations (default: /mnt)"
+	echo "-a alignment      : use this alignment (in byte) instead of the sector size reported by disk (ex 4096 ssd)"
 	echo "-c                : enable lzjb compression for all datasets"
 	echo "-l                : use legacy mounts (via fstab) instead of ZFS mounts"
 	echo "-4                : use fletcher4 as default checksum algorithm"
@@ -36,7 +37,7 @@ help() {
 	echo "You can enable all swap partitions and/or make a gmirror-ed swap later."
 }
 
-while getopts d:u:t:r:p:s:z:m:V:hcl4 o; do
+while getopts d:u:t:r:p:s:z:m:V:a:hcl4 o; do
 	case "$o" in
         	d) DEVS="$DEVS ${OPTARG##/dev/}" ;;
 		u) URL="${OPTARG}" ;;
@@ -47,6 +48,7 @@ while getopts d:u:t:r:p:s:z:m:V:hcl4 o; do
 		r) RAID="${OPTARG}" ;;
 		z) ZPART="${OPTARG}" ;;
 		V) VERSION="${OPTARG}" ;;
+		a) ALIGN="${OPTARG}" ;;
 		c) LZJB=1 ;;
 		l) LEGACY=1 ;;
 		4) FLETCHER=1 ;;
@@ -195,6 +197,16 @@ fi
 # Create GPT
 
 for DEV in ${DEVS}; do
+	if [ -n "$ALIGN" ]; then
+		sector_size=`diskinfo /dev/${DEV} | awk '{print $2}'`
+		# ALIGN should divisible by what the system thinks is the
+		# sector size or else there is a problem.
+		if [ $(($ALIGN % $sector_size)) -ne 0 ]; then
+			echo " error, align value \"$ALIGN\" is not divisible by sector size \"$sector_size\"."
+			exit 1
+		fi
+		GPART_ALIGN="-a $(($ALIGN / $sector_size))"
+	fi
 	echo -n "Creating GUID partitions on ${DEV} ..."
 	if ! /sbin/gpart create -s GPT /dev/${DEV} > /dev/null; then
 		echo " error"
@@ -205,12 +217,12 @@ for DEV in ${DEVS}; do
 		echo " error"
 		exit 1
 	fi
-	if ! /sbin/gpart add -t freebsd-boot -s 128 ${DEV} > /dev/null; then
+	if ! /sbin/gpart add -t freebsd-boot -s 128 ${GPART_ALIGN} ${DEV} > /dev/null; then
 		echo " error"
 		exit 1
 	fi
 	if [ -n "${SWAP}" ]; then
-		if ! /sbin/gpart add -t freebsd-swap -s "${SWAP}" ${DEV} > /dev/null; then
+                if ! /sbin/gpart add -t freebsd-swap -s "${SWAP}" ${GPART_ALIGN} ${DEV} > /dev/null; then
 			echo " error"
 			exit 1
 		fi
@@ -222,7 +234,7 @@ for DEV in ${DEVS}; do
 			FSWAP=${SWAPPART}
 		fi
 	fi
-	if ! /sbin/gpart add -t freebsd-zfs ${SZPART} ${DEV} > /dev/null; then
+	if ! /sbin/gpart add -t freebsd-zfs ${GPART_ALIGN} ${SZPART} ${DEV} > /dev/null; then
 		echo " error"
 		exit 1
 	fi
@@ -256,6 +268,20 @@ for DEV in ${DEVS}; do
 	GPARTS="${GPARTS} ${GPART}"
 	PARTS="${PARTS} ${DEV}p${PART}"
 done
+
+if [ -n "$ALIGN" ]; then
+	for part in ${PARTS}; do
+		if ! /sbin/gnop create -S ${ALIGN} ${part}; then
+			echo " error creating nop partition on ${part} for alignment."
+			exit 1
+		fi
+		PARTS_NOP=" $PARTS_NOP ${part}.nop"
+	done
+fi
+
+if [ -n "${PARTS_NOP}" ]; then
+        PARTS="${PARTS_NOP}"
+fi
 
 echo -n "Creating ZFS pool ${POOL} on${PARTS} ..."
 if ! /sbin/zpool create -f -m none ${ALTROOT} ${VERSION} ${POOL} ${RAID} ${PARTS} > /dev/null 2> /dev/null; then
@@ -375,6 +401,13 @@ if ! /sbin/zpool export ${POOL} > /dev/null 2> /dev/null; then
 	echo " error exporting pool"
 	exit 1
 fi
+for part in ${PARTS_NOP}; do
+	if ! /sbin/gnop destroy ${part}; then
+		echo " error deleting nop part ${part}"
+		exit 1
+	fi
+done
+
 if ! /sbin/zpool import ${ALTROOT} ${POOL} > /dev/null 2> /dev/null; then
 	echo " error importing pool"
 	exit 1
