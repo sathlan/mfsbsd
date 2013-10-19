@@ -335,7 +335,7 @@ for FS in ${FS_LIST}; do
 		MNTPT=
 	fi
 	fs_opts=""
-	eval fs_opts=\$fs_options_$((echo $FS | tr '/' '_'))
+	eval fs_opts=\$fs_options_$(echo $FS | tr '/' '_')
 	if ! /sbin/zfs create ${MNTPT} ${fs_opts} ${POOL}/root/${FS} > /dev/null 2> /dev/null; then
 		echo " error"
 		exit 1
