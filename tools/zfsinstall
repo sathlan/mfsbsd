@@ -4,7 +4,20 @@
 # mfsBSD ZFS install script
 # Copyright (c) 2011-2013 Martin Matuska <mm at FreeBSD.org>
 #
-FS_LIST="var tmp"
+FS_LIST="tmp usr usr/home usr/ports usr/ports/distfiles usr/ports/packages usr/src var var/crash var/db var/db/pkg var/empty var/log var/mail var/run var/tmp"
+fs_options_tmp="-o compression=on -o exec=on -o setuid=off"
+fs_options_usr_ports="-o compression=lzjb -o setuid=off"
+fs_options_usr_ports_distfiles="-o compression=off -o exec=off -o setuid=off"
+fs_options_usr_ports_packages="-o compression=off -o exec=off -o setuid=off"
+fs_options_usr_src=" -o compression=lzjb -o exec=off -o setuid=off"
+fs_options_var_crash=" -o compression=lzjb -o exec=off -o setuid=off"
+fs_options_var_db="-o exec=off -o setuid=off"
+fs_options_var_db_pkg="-o compression=lzjb -o exec=on -o setuid=off"
+fs_options_var_empty="-o exec=off -o setuid=off"
+fs_options_var_log="-o compression=lzjb -o exec=off -o setuid=off"
+fs_options_var_mail="-o compression=gzip -o exec=off -o setuid=off"
+fs_options_var_run="-o exec=off -o setuid=off"
+fs_options_var_tmp="-o compression=lzjb -o exec=on -o setuid=off"
 
 usage() {
 	echo "Usage: $0 [-h] -d geom_provider [-d geom_provider ...] -u dist_url [-r mirror|raidz] [-m mount_point] [-p zfs_pool_name] [-V zfs_pool_version] [-s swap_partition_size] [-z zfs_partition_size] [-a alignment] [-c] [-l] [-4]"
@@ -321,7 +334,9 @@ for FS in ${FS_LIST}; do
 	else
 		MNTPT=
 	fi
-	if ! /sbin/zfs create ${MNTPT} ${POOL}/root/${FS} > /dev/null 2> /dev/null; then
+	fs_opts=""
+	eval fs_opts=\$fs_options_$((echo $FS | tr '/' '_'))
+	if ! /sbin/zfs create ${MNTPT} ${fs_opts} ${POOL}/root/${FS} > /dev/null 2> /dev/null; then
 		echo " error"
 		exit 1
 	fi
